@@ -1,3 +1,5 @@
+Maps of US and other visualisations of the Lending Club dataset
+
 ## MAPS ##
 states <- map_data("state") # location information of all US states
 
