@@ -1,0 +1,570 @@
+## MAPS ##
+states <- map_data("state") # location information of all US states
+
+# replace abbreviated state names (state.abb) with full names (state.name)
+find_states <- function(x) {
+  if (length(state.name[grep(x, state.abb, ignore.case = TRUE)]) == 0)
+    "District of Columbia"
+  else
+    state.name[grep(x, state.abb)]
+}
+
+state_names <- data$addr_state %>% 
+  sapply(find_states) %>% 
+  unlist()
+  
+# change column name to region and to lower case to merge with state locations
+data$addr_state <- tolower(state_names)
+colnames(data)[12] <- "region"
+
+loans_per_state <- data$region %>% 
+  table() %>% 
+  data.frame() %>% 
+  set_names(c("region", "n_loans")) %>% 
+  merge(states, by="region") %>% 
+  arrange(order)
+
+# no data from North Dakota so add 1 loan to plot the map
+nd<-map_data("state")[grep("north dakota", map_data("state")[,5]),]
+nd$n_loans <- 1
+loans_per_state <- rbind(loans_per_state, nd) %>% 
+  arrange(order)
+
+# create bins for the number of loans
+loans_per_state$bin <- NA
+loans_per_state$bin[loans_per_state$n_loans < 100] <- "Under 100"
+loans_per_state$bin[loans_per_state$n_loans >= 100 & loans_per_state$n_loans < 500] <- "100-500"
+loans_per_state$bin[loans_per_state$n_loans >= 500 & loans_per_state$n_loans < 1000] <- "500-1000"
+loans_per_state$bin[loans_per_state$n_loans >= 1000 & loans_per_state$n_loans < 2000] <- "1000-2000"
+loans_per_state$bin[loans_per_state$n_loans >= 2000 & loans_per_state$n_loans < 3000] <- "2000-3000"
+loans_per_state$bin[loans_per_state$n_loans >= 3000] <- "Over 3000"
+loans_per_state$bin <- factor(loans_per_state$bin,
+                              levels = c("Under 100",
+                                         "100-500",
+                                         "500-1000",
+                                         "1000-2000",
+                                         "2000-3000",
+                                         "Over 3000"))
+
+
+# PLOT: Number of Loans by State
+loans_per_state %>%
+  ggplot() + 
+  geom_polygon(aes(
+    x = long,
+    y = lat,
+    group = group,
+    fill = bin
+  ), color = 'grey20') + 
+  coord_equal(1.35) + 
+  theme_minimal() + 
+  labs(x = "", y = "", title = "Number of Loans by State") + 
+  scale_fill_brewer(palette="Blues", name = "") +
+  scale_x_continuous(breaks = NULL) + 
+  scale_y_continuous(breaks = NULL) +
+  theme(
+    plot.title = element_text(size = 12),
+    axis.text = element_text(size = 8),
+    legend.text = element_text(size = 8),
+    legend.title = element_text(size = 8),
+    panel.background = element_blank(),
+    legend.position = c(.45,0),
+    legend.key.size = unit(0.6, "line"),
+    legend.direction="horizontal"
+  )
+
+# visualize interest rate by state
+ir_per_state <- data %>% 
+  select(region, int_rate) %>% 
+  group_by(region) %>% 
+  summarise(int_rate = mean(int_rate)) %>% 
+  merge(states, by="region") %>% 
+  arrange(order)
+
+# no data from North Dakota so change its interest rate to average of others to plot the map
+nd<-map_data("state")[grep("north dakota", map_data("state")[,5]),]
+nd$int_rate <- mean(ir_per_state$int_rate)
+ir_per_state <- rbind(ir_per_state, nd) %>% 
+  arrange(order)
+
+# create bins for interest rates
+ir_per_state$bin <- NA
+ir_per_state$bin[ir_per_state$int_rate < 9] <- "Under 9%"
+ir_per_state$bin[ir_per_state$int_rate >= 9 & ir_per_state$int_rate < 10] <- "9-10%"
+ir_per_state$bin[ir_per_state$int_rate >= 10 & ir_per_state$int_rate < 11] <- "10-11%"
+ir_per_state$bin[ir_per_state$int_rate >= 11 & ir_per_state$int_rate < 12] <- "11-12%"
+ir_per_state$bin[ir_per_state$int_rate >= 12 & ir_per_state$int_rate < 12.5] <- "12-12,5%"
+ir_per_state$bin[ir_per_state$int_rate >= 12.5] <- "Over 12,5%"
+ir_per_state$bin <- factor(ir_per_state$bin,
+                              levels = c("Under 9%",
+                                         "9-10%",
+                                         "10-11%",
+                                         "11-12%",
+                                         "12-12,5%",
+                                         "Over 12,5%"))
+
+# PLOT: Interest Rate by State
+ir_per_state %>% 
+  ggplot() + 
+  geom_polygon(aes(
+    x = long,
+    y = lat,
+    group = group,
+    fill = bin
+  ), color = 'grey20') + 
+  coord_equal(1.35) + 
+  theme_minimal() + 
+  labs(x = "", y = "", title = "Average Interest Rate by State") + 
+  scale_fill_brewer(palette="Blues", name = '') +
+  scale_x_continuous(breaks = NULL) + 
+  scale_y_continuous(breaks = NULL) +
+  guides(fill=guide_legend(nrow=2,byrow=TRUE)) +
+  theme(
+    plot.title = element_text(size = 12),
+    axis.text = element_text(size = 8),
+    legend.text = element_text(size = 8),
+    legend.title = element_text(size = 8),
+    panel.background = element_blank(),
+    legend.position = c(.45,0),
+    legend.key.size = unit(0.6, "line"),
+    legend.direction="horizontal"
+  )
+
+# Default Rate per State variable
+df_per_state <- data %>% 
+  select(region, loan_status) %>% 
+  filter(loan_status == "default") %>% 
+  count(region) %>% 
+  mutate(n_default = n)
+
+# join with state coordinates
+df_per_state <- inner_join(df_per_state, loans_per_state, by="region") %>% 
+  mutate(def_rate = n_default / n_loans)
+
+# select the needed columns
+df_per_state <- df_per_state %>% 
+  select(region, def_rate, long, lat, group, order, subregion)
+  
+# no data from North Dakota, Indiana, Iowa, or Maine so change their interest rates to average of others to plot the map
+nd<-map_data("state")[grep("north dakota|indiana|iowa|maine", map_data("state")[,5]),]
+nd$def_rate <- mean(df_per_state$def_rate)
+df_per_state <- rbind(df_per_state, nd) %>% 
+  arrange(order)
+
+# create bins for default rates
+df_per_state$bin <- NA
+df_per_state$bin[df_per_state$def_rate < 0.10] <- "Under 10%"
+df_per_state$bin[df_per_state$def_rate >= 0.10 & df_per_state$def_rate < 0.12] <- "10-12%"
+df_per_state$bin[df_per_state$def_rate >= 0.12 & df_per_state$def_rate < 0.14] <- "12-14%"
+df_per_state$bin[df_per_state$def_rate >= 0.14 & df_per_state$def_rate < 0.16] <- "14-16%"
+df_per_state$bin[df_per_state$def_rate >= 0.16 & df_per_state$def_rate < 0.18] <- "16-18%"
+df_per_state$bin[df_per_state$def_rate >= 0.18] <- "Over 18%"
+df_per_state$bin <- factor(df_per_state$bin,
+                           levels = c("Under 10%",
+                                      "10-12%",
+                                      "12-14%",
+                                      "14-16%",
+                                      "16-18%",
+                                      "Over 18%"))
+
+# PLOT: Default Rate by State
+df_per_state %>% 
+  ggplot() + 
+  geom_polygon(aes(
+    x = long,
+    y = lat,
+    group = group,
+    fill = bin
+  ), color = 'grey20') + 
+  coord_equal(1.35) + 
+  labs(x = "", y = "", title = "Average Default Rate by State") + 
+  scale_fill_brewer(palette="OrRd", name = '') +
+  scale_x_continuous(breaks = NULL) + 
+  scale_y_continuous(breaks = NULL) +
+  theme(
+    plot.title = element_text(size = 12),
+    axis.text = element_text(size = 8),
+    legend.text = element_text(size = 8),
+    legend.title = element_text(size = 8),
+    panel.background = element_blank(),
+    legend.position = c(.45,0),
+    legend.key.size = unit(0.6, "line"),
+    legend.direction="horizontal",
+    legend.background = element_blank()
+  )
+
+## END MAPS ##
+
+##### MORE VISUALIZATIONS #####
+
+# average loan amount by grade
+loan_by_grade <- data %>% 
+  select(loan_amnt, grade) %>% 
+  group_by(grade) %>% 
+  summarise(loan_amnt = mean(loan_amnt))
+
+loan_by_grade$grade <- as.factor(loan_by_grade$grade)
+
+loan_by_grade %>% 
+  ggplot(aes(x = grade, y = loan_amnt,
+             fill = grade)) +
+  geom_bar(stat = "identity", width = 0.7, position = 'stack', colour = "grey20") +
+  guides(fill=FALSE) +
+  labs(x = "Grade",
+       y = "Loan Amount",
+       fill = "",
+       title = "Average Loan by Grade") +
+  scale_fill_brewer(palette = "OrRd") +
+  geom_text(aes(label = (round(loan_amnt, 0))),
+            colour = "black",
+            size = 2,
+            vjust = -0.4) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(size = 12),
+    plot.subtitle = element_text(size = 8),
+    axis.text = element_text(size = 8),
+    axis.title.y = element_text(size = 8),
+    axis.title.x = element_text(size = 8))
+
+# average interest rate per grade
+intrate_by_grade <- data %>% 
+  select(int_rate, grade) %>% 
+  group_by(grade) %>% 
+  summarise(int_rate = mean(int_rate))
+
+intrate_by_grade$grade <- as.factor(intrate_by_grade$grade)
+
+intrate_by_grade %>% 
+  ggplot(aes(x = grade, y = int_rate,
+             fill = grade
+  )) +
+  geom_bar(stat = "identity", width = 0.7, colour = "grey20") +
+  guides(fill=FALSE) +
+  labs(x = "Grade",
+       y = "Interest Rate",
+       fill = "",
+       title = "Average Interest Rate by Grade") +
+  scale_fill_brewer(palette = "OrRd") +
+  geom_text(aes(label = (round(int_rate, 2))),
+            colour = "black",
+            size = 2,
+            vjust = -0.4) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(size = 12),
+    plot.subtitle = element_text(size = 8),
+    axis.text = element_text(size = 8),
+    axis.title.y = element_text(size = 8),
+    axis.title.x = element_text(size = 8))
+
+# defaults by grade
+defaults_by_grade <- data %>% 
+  select(grade, loan_status) %>% 
+  count(grade, loan_status) %>% 
+  group_by(grade) %>% 
+  mutate(perc = n / sum(n))
+
+defaults_by_grade$grade <- as.factor(defaults_by_grade$grade)
+defaults_by_grade$loan_status <- as.factor(defaults_by_grade$loan_status)  
+
+# PLOT: Defaults by Grade
+defaults_by_grade %>% 
+  ggplot(aes(x = grade, y = perc*100,
+             fill = loan_status
+  )) +
+  geom_bar(stat = "identity", width = 0.7, position = 'stack', colour = "grey20") +
+  labs(x = "Grade",
+       y = "Percent",
+       fill = "",
+       title = "Defaults by Grade",
+       subtitle = "Ratio of Paid and Defaulted Loans (only matured loans)") +
+  scale_fill_manual(values=c("#fb6a4a", "#0571b0")) +
+  geom_text(aes(label = (round(perc*100, 1))),
+            colour = "white",
+            size = 2,
+            position = position_stack(vjust = 0.55)) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(size = 12),
+    plot.subtitle = element_text(size = 7),
+    axis.text = element_text(size = 8),
+    axis.title.y = element_text(size = 8),
+    axis.title.x = element_text(size = 8),
+    legend.text = element_text(size = 8)
+  )
+
+# defaults by home ownership
+defaults_by_ownership <- data %>% 
+  select(home_ownership, loan_status) %>% 
+  filter(!(home_ownership== 'NONE')) %>% 
+  count(home_ownership, loan_status) %>% 
+  group_by(home_ownership) %>% 
+  mutate(perc = n / sum(n)) %>% 
+  ungroup()
+
+defaults_by_ownership$home_ownership <- as.factor(defaults_by_ownership$home_ownership)
+defaults_by_ownership$loan_status <- as.factor(defaults_by_ownership$loan_status)  
+
+# PLOT: Defaults by Home Ownership
+defaults_by_ownership %>% 
+  ggplot(aes(x = home_ownership, y = perc*100,
+             fill = loan_status
+  )) +
+  geom_bar(stat = "identity", width = 0.7, position = 'stack', colour = "grey20") +
+  labs(x = "Grade",
+       y = "Percent",
+       fill = "",
+       title = "Defaults by Home Ownership",
+       subtitle = "Ratio of Paid and Defaulted Loans (only matured loans)") +
+  scale_fill_manual(values=c("#fb6a4a", "#0571b0")) +
+  geom_text(aes(label = (round(perc*100, 1))),
+            colour = "white",
+            size = 2,
+            position = position_stack(vjust = 0.5)) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(size = 12),
+    plot.subtitle = element_text(size = 7),
+    axis.text = element_text(size = 8),
+    axis.title.y = element_text(size = 8),
+    axis.title.x = element_text(size = 8),
+    legend.text = element_text(size = 8)
+  )
+
+# loan amount by income level
+employment_length_loan_amnt <- data[,c('emp_length', "loan_amnt")] %>% 
+  na.omit()
+
+employment_length_loan_amnt$bin <- NA
+employment_length_loan_amnt$bin[employment_length_loan_amnt$emp_length <= 3] <- "Low"
+employment_length_loan_amnt$bin[employment_length_loan_amnt$emp_length > 3 & employment_length_loan_amnt$emp_length <= 7] <- "Medium"
+employment_length_loan_amnt$bin[employment_length_loan_amnt$emp_length > 7] <- "High"
+employment_length_loan_amnt$bin <- factor(employment_length_loan_amnt$bin, 
+                                   levels = c("Low",
+                                              "Medium",
+                                              "High"))
+employment_length_loan_amnt %>% 
+  ggplot(aes(x=bin, 
+             y=loan_amnt, 
+             fill = bin)) +
+  geom_violin(scale = "count",
+              adjust = .9,
+              colour = "grey20",
+              trim = FALSE) +
+  geom_boxplot(width=.1,
+               fill = "white", 
+               colour = "black",
+               outlier.colour = "red", 
+               outlier.shape = 1,
+               alpha = 0.8) +
+  expand_limits(y = 40000) + 
+  labs(x = "Employment Length",
+       y = "Loan Amount",
+       fill = "",
+       title = "Loan Amount by Employment Length") +
+  scale_fill_brewer(palette = "Paired") +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(size = 12),
+    plot.subtitle = element_text(size = 7),
+    axis.text = element_text(size = 8),
+    axis.title.y = element_text(size = 8),
+    axis.title.x = element_text(size = 8),
+    legend.text = element_text(size = 8)
+  )
+  
+# interest rate by income level - violin
+employment_length_int_rate <- data[,c('emp_length', "int_rate")] %>% 
+  na.omit()
+
+employment_length_int_rate$bin <- NA
+employment_length_int_rate$bin[employment_length_int_rate$emp_length <= 3] <- "Low"
+employment_length_int_rate$bin[employment_length_int_rate$emp_length > 3 & employment_length_int_rate$emp_length <= 7] <- "Medium"
+employment_length_int_rate$bin[employment_length_int_rate$emp_length > 7] <- "High"
+employment_length_int_rate$bin <- factor(employment_length_int_rate$bin, 
+                                levels = c("Low",
+                                           "Medium",
+                                           "High"))
+employment_length_int_rate %>% 
+  ggplot(aes(x=bin, 
+             y=int_rate, 
+             fill = bin)) + 
+  geom_violin(scale = "width",
+              adjust = .9,
+              colour = "grey20") +
+  geom_boxplot(width=.2,
+               fill = "white", 
+               colour = "black",
+               outlier.colour = "red", 
+               outlier.shape = 1,
+               alpha = 0.8) +
+  labs(x = "Employment Length",
+       y = "Interest Rate",
+       fill = "",
+       title = "Interest Rate by Employment Length") +
+  scale_fill_brewer(palette = "Paired") +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(size = 12),
+    plot.subtitle = element_text(size = 7),
+    axis.text = element_text(size = 8),
+    axis.title.y = element_text(size = 8),
+    axis.title.x = element_text(size = 8),
+    legend.text = element_text(size = 8)
+  )
+
+# Interest rate scatter plot divided to terms of 36 and 60 months
+index = createDataPartition(y = data$loan_status, p = 0.90)[[1]]
+amnt_ir_term <- data[-index,]
+amnt_ir_term$term[as.character(amnt_ir_term$term) == '1'] <- "36 months"
+amnt_ir_term$term[as.character(amnt_ir_term$term) == '2'] <- "60 months"
+amnt_ir_term$term <- as.factor(amnt_ir_term$term)
+
+amnt_ir_term %>% 
+  ggplot() +
+  geom_point(aes(x = loan_amnt, 
+                 y = int_rate,
+                 color = term)) +
+  scale_color_brewer(palette="Paired") + 
+  labs(x = "Loan Amount",
+       y = "Interest Rate",
+       title = "Interest Rate and Loan Amount",
+       subtitle = "Categorized by Loan Maturity") +
+  guides(color=guide_legend(title="Term")) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(size = 12),
+    plot.subtitle = element_text(size = 7),
+    axis.text = element_text(size = 8),
+    axis.title.y = element_text(size = 8),
+    axis.title.x = element_text(size = 8),
+    legend.text = element_text(size = 8),
+    legend.title = element_text(size = 10)
+  )
+
+# Loan amount, default rate, barplot
+def_rates <- data %>% 
+  group_by(loan_amnt, loan_status) %>%
+  summarise(n_loans = n()) %>% 
+  mutate(combined = sum(n_loans)) %>% 
+  filter(loan_status == "default") %>% 
+  mutate(def_rate = (n_loans / combined))
+
+ann_inc_df <- data %>% 
+  left_join(def_rates, by = c(loan_amnt = "loan_amnt"))
+
+ann_inc_df$def_rate[is.na(ann_inc_df$def_rate)] <- 0
+summary(ann_inc_df$loan_amnt)
+
+
+ann_inc_df$bin <- NA
+ann_inc_df$bin[ann_inc_df$loan_amnt < 5000] <- "Under 5k"
+ann_inc_df$bin[ann_inc_df$loan_amnt >= 5000 & ann_inc_df$loan_amnt < 10000] <- "5k-10k"
+ann_inc_df$bin[ann_inc_df$loan_amnt >= 10000 & ann_inc_df$loan_amnt < 15000] <- "10k-15k"
+ann_inc_df$bin[ann_inc_df$loan_amnt >= 15000 & ann_inc_df$loan_amnt < 20000] <- "15k-20k"
+ann_inc_df$bin[ann_inc_df$loan_amnt >= 20000 & ann_inc_df$loan_amnt < 25000] <- "20k-25k"
+ann_inc_df$bin[ann_inc_df$loan_amnt >= 25000 & ann_inc_df$loan_amnt < 30000] <- "25k-30k"
+ann_inc_df$bin[ann_inc_df$loan_amnt >= 30000] <- "Over 30k"
+ann_inc_df$bin <- factor(ann_inc_df$bin,
+                              levels = c("Under 5k",
+                                         "5k-10k",
+                                         "10k-15k",
+                                         "15k-20k",
+                                         "20k-25k",
+                                         "25k-30k",
+                                         "Over 30k"))
+
+loan_amnt_df_avg <- ann_inc_df %>% 
+  group_by(bin) %>% 
+  summarise(def_rate = mean(def_rate))
+
+loan_amnt_df_avg %>% 
+  ggplot(aes(x = bin, 
+           y = def_rate,
+           fill = bin
+)) +
+  geom_bar(stat = "identity", width = 0.7, position = 'stack', colour = "grey20") +
+  labs(x = "Loan Amount",
+       y = "Default Rate",
+       fill = "",
+       title = "Average Default Rate by Loan Amount") +
+  scale_fill_brewer(palette = "OrRd") +
+  scale_y_continuous(label = percent) +
+  geom_text(aes(label = (round(def_rate*100, 1))),
+            colour = "black",
+            size = 2,
+            position = position_stack(vjust = 0.5)) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(size = 11),
+    plot.subtitle = element_text(size = 7),
+    axis.text = element_text(size = 8),
+    axis.title.y = element_text(size = 8),
+    axis.title.x = element_text(size = 8),
+    legend.text = element_text(size = 8),
+    axis.text.x = element_text(size = 6)
+  )
+
+# Annual income, default rate, bar plot
+
+def_rates <- data %>% 
+  group_by(annual_inc, loan_status) %>%
+  summarise(n_loans = n()) %>% 
+  mutate(combined = sum(n_loans)) %>% 
+  filter(loan_status == "default") %>% 
+  mutate(def_rate = (n_loans / combined))
+
+ann_inc_df <- data %>% 
+  left_join(def_rates, by = c(annual_inc = "annual_inc"))
+
+ann_inc_df$def_rate[is.na(ann_inc_df$def_rate)] <- 0
+sum(is.na(ann_inc_df$def_rate))
+
+ann_inc_df$bin <- NA
+ann_inc_df$bin[ann_inc_df$annual_inc < 25000] <- "Under 25k"
+ann_inc_df$bin[ann_inc_df$annual_inc >= 25000 & ann_inc_df$annual_inc < 50000] <- "25k-50k"
+ann_inc_df$bin[ann_inc_df$annual_inc >= 50000 & ann_inc_df$annual_inc < 75000] <- "50k-75k"
+ann_inc_df$bin[ann_inc_df$annual_inc >= 75000 & ann_inc_df$annual_inc < 100000] <- "75k-100k"
+ann_inc_df$bin[ann_inc_df$annual_inc >= 100000 & ann_inc_df$annual_inc < 125000] <- "100k-125k"
+ann_inc_df$bin[ann_inc_df$annual_inc >= 125000] <- "Over 125k"
+ann_inc_df$bin <- factor(ann_inc_df$bin,
+                         levels = c("Under 25k",
+                                    "25k-50k",
+                                    "50k-75k",
+                                    "75k-100k",
+                                    "100k-125k",
+                                    "Over 125k"))
+
+ann_inc_df_avg <- ann_inc_df %>% 
+  group_by(bin) %>% 
+  summarise(def_rate = mean(def_rate))
+
+# PLOT: Annual income and default rate
+ann_inc_df_avg %>% 
+  ggplot(aes(x = bin, 
+             y = def_rate,
+             fill = bin
+  )) +
+  geom_bar(stat = "identity", width = 0.7, position = 'stack', colour = "grey20") +
+  labs(x = "Annual Income",
+       y = "Default Rate",
+       fill = "",
+       title = "Average Default Rate by Annual Income") +
+  scale_fill_brewer(palette = "OrRd", 
+                    direction = -1) +
+  scale_y_continuous(label = percent) +
+  geom_text(aes(label = (round(def_rate*100, 1))),
+            colour = "black",
+            size = 2,
+            position = position_stack(vjust = 0.5)) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(size = 11),
+    plot.subtitle = element_text(size = 7),
+    axis.text = element_text(size = 8),
+    axis.title.y = element_text(size = 8),
+    axis.title.x = element_text(size = 8),
+    legend.text = element_text(size = 8),
+    axis.text.x = element_text(size = 6)
+  )
